@@ -1,0 +1,116 @@
+- hosts: all
+  tasks:
+  - name: update ubuntu
+    apt: name=* state=latest
+  # - name: uninstall k3s
+  #   shell: k3s-uninstall.sh
+  - name: install packges
+    apt: name={{item}} state=latest
+    with_items:
+      - apparmor
+      - apparmor-utils
+      - iptables
+- hosts: master_node
+  tasks:
+  - name: "Create directory for etcd binaries"
+    file:
+      path: /opt/etcd/bin
+      state: directory
+      owner: root
+      group: root
+      mode: 0700
+  - name: "Download the tarball into the /tmp directory"
+    get_url:
+      url: https://storage.googleapis.com/etcd/v{{ ETCD_VER }}/etcd-v{{ ETCD_VER }}-linux-amd64.tar.gz
+      dest: /tmp/etcd.tar.gz
+      owner: root
+      group: root
+      mode: 0600
+      force: True
+  - name: "Extract the contents of the tarball"
+    unarchive:
+      src: /tmp/etcd.tar.gz
+      dest: /opt/etcd/bin/
+      owner: root
+      group: root
+      mode: 0600
+      extra_opts:
+        - --strip-components=1
+      decrypt: True
+      remote_src: True
+  - name: "Set permissions for etcd"
+    file:
+      path: /opt/etcd/bin/etcd
+      state: file
+      owner: root
+      group: root
+      mode: 0700
+  - name: "Set permissions for etcdctl"
+    file:
+      path: /opt/etcd/bin/etcdctl
+      state: file
+      owner: root
+      group: root
+      mode: 0700
+  - name: "Add /opt/etcd/bin/ to the $PATH environment variable"
+    lineinfile:
+      path: /etc/profile
+      line: export PATH="$PATH:/opt/etcd/bin"
+      state: present
+      create: True
+      insertafter: EOF
+  - name: "Set the ETCDCTL_API environment variable to 3"
+    lineinfile:
+      path: /etc/profile
+      line: export ETCDCTL_API=3
+      state: present
+      create: True
+      insertafter: EOF
+  - name: "Create a etcd service"
+    copy:
+      src: etcd.files/etcd.service
+      remote_src: False
+      dest: /etc/systemd/system/etcd.service
+      owner: root
+      group: root
+      mode: 0644
+  - name: "Stop the etcd service"
+    command: systemctl stop etcd
+  - name: "Create a data directory"
+    file:
+      path: /var/lib/etcd/{{ hostvars[inventory_hostname]['ansible_facts']['hostname'] }}.etcd
+      state: "{{ item }}"
+      owner: root
+      group: root
+      mode: 0755
+    with_items:
+      - absent
+      - directory
+  - name: "Create directory for etcd configuration"
+    file:
+      path: /etc/etcd
+      state: directory
+      owner: root
+      group: root
+      mode: 0755
+  - name: "Create configuration file for etcd"
+    template:
+      src: etcd.files/etcd.conf.yaml.j2
+      dest: /etc/etcd/etcd.conf.yaml
+      owner: root
+      group: root
+      mode: 0600
+  - name: "Enable the etcd service"
+    command: systemctl enable etcd
+  - name: "Start the etcd service"
+    command: systemctl restart etcd
+  - name: "install k3s cluster"
+    shell: curl -sfL https://get.k3s.io | K3S_DATASTORE_ENDPOINT="{% for host in groups['master_node'] %}http://{{ hostvars[host]['ansible_facts']['enp41s0']['ipv4']['address'] }}:2380{% if not loop.last %},{% endif %}{% endfor %}" INSTALL_K3S_CHANNEL="latest" INSTALL_K3S_VERSION="v1.24.4+k3s1" INSTALL_K3S_EXEC="server --node-ip={{ inventory_hostname }}" K3S_TOKEN="{{ K3S_TOKEN }}" sh -s -
+  # - name: "Install helm"
+  #   command: curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+- hosts: agent_node
+  tasks:
+  - name: join agent to k3s cluster 
+    shell: curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL="latest" INSTALL_K3S_VERSION="v1.24.4+k3s1" K3S_URL=https://{{ groups['master_node'][0] }}:6443 K3S_TOKEN="{{ K3S_TOKEN }}" sh -s -
+  
