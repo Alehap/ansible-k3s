@@ -55,3 +55,5 @@ initial-cluster: node-2=http://1.108.205.2:2380,node-3=http://1.21.33.3:2380,nod
 ```
 
 And restart the etcd service.
+
+FAQ etcd service: https://etcd.io/docs/v3.4/faq/
